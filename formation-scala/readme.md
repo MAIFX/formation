@@ -100,5 +100,5 @@ CRUD avec un store de type Map
 
 ## Exercice 5
 
-* CRUD +++ avec composition d'appel asynchrone 
+* CRUD +++ avec composition d'appels asynchrones 
 * SSE ou web socket avec streams 
