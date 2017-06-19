@@ -9,16 +9,13 @@ http://docs.scala-lang.org/fr/cheatsheets/
 
 ## Fonction
 
-## String interpolation
 
 * def
 * Tout est expression !
 
+## String interpolation
+
 ## Exercice 1
-
-Créer une application play
-
-sbt new ...
 
 Blabla fonctionnement de play
 
@@ -33,20 +30,68 @@ Créer une api qui retourne un json
 * trait
 * classes abstraites
 
-## Pattern matching
 
 ## SDK
 
+* Tuples
 * Option
 * List
 * Either
 * Try
-* Future
+* Map 
 
+## Pattern matching
 
-## Evaluations
+* Match 
+* Destructuration 
 
-* lazy
-* call by name
+## Exercice 2
+
+CRUD avec un store de type Map 
+
+* Données en case class 
+* Manipulation d'option 
+* toJson fonction case class => String avec string interpolation  
+
 
 ## Implicits
+
+* lib play json 
+
+## Exercice 3 
+
+* Utiliser play json pour sérialiser les case class
+ 
+## Monades 
+
+* map / flatMap 
+* for comprehension 
+
+## Futures / Programmation asynchrone 
+
+* Future scala 
+* Execution context 
+* Introduction à wsClient 
+
+## Exercice 4 
+
+* Modifier le CRUD avec des futures 
+* Utiliser WS client pour appeler une api de stockage clé valeur
+
+## Scala "avancé"
+
+* Call by name
+* Lazy val 
+* Currying
+* Import 
+
+# Programmation réactive détaillée  
+
+* Gestion des pools de threads 
+* Composition de futures 
+* Streams 
+
+## Exercice 5
+
+* CRUD +++ avec composition d'appel asynchrone 
+* SSE ou web socket avec streams 
