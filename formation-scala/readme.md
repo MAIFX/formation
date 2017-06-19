@@ -6,18 +6,25 @@ http://docs.scala-lang.org/fr/cheatsheets/
 
 * var
 * val
+* Déclaration des types 
+
+## Les types de base 
+
+* String
+* Int
+* Boolean 
+* ... 
+* String interpolation
 
 ## Fonction
 
-
 * def
 * Tout est expression !
-
-## String interpolation
+* Unit 
 
 ## Exercice 1
 
-Blabla fonctionnement de play
+Présentation de play
 
 Créer une api qui retourne un json
 
