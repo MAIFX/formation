@@ -1,6 +1,11 @@
-#Langage
+# Langage
 
 http://docs.scala-lang.org/fr/cheatsheets/
+
+## Slides
+
+* https://github.com/mathieuancelin/EMN-2016/blob/master/play2-2.5.pdf
+* https://github.com/mathieuancelin/EMN-2016/blob/master/scala.pdf
 
 ## Pré requis 
 
