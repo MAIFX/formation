@@ -2,6 +2,13 @@
 
 http://docs.scala-lang.org/fr/cheatsheets/
 
+## Pré requis 
+
+* sbt : 
+    * http://www.scala-sbt.org/download.html   
+* intellij 
+    * https://www.jetbrains.com/idea/download
+
 ## Variables
 
 * var
@@ -28,36 +35,58 @@ Présentation de play
 
 Créer une api qui retourne un json
 
+* /messages/:msg 
+
+=> retourne { message: "Hello $msg" }
 
 ## Classes et objets
 
 * class
+    * variables de classe
+    * variables privées 
+    * constructeurs altérnatifs 
 * case class
-* object
-* trait
+* object + companion 
+    * méthode apply  
+    
+Dev avancé : 
+
 * classes abstraites
+* trait
 
-
-## SDK
-
-* Tuples
-* Option
-* List
-* Either
-* Try
-* Map 
 
 ## Pattern matching
 
 * Match 
 * Destructuration 
 
-## Exercice 2
+## SDK
 
-CRUD avec un store de type Map 
+* Tuples
 
-* Données en case class 
-* Manipulation d'option 
+Structures monadiques 
+* Option
+* List
+    * Cons
+    * écrire la fonction map en récursif 
+* Try
+* Either
+
+=> map, flatMap (et fold ?)
+
+
+## Exercice 2 : CRUD part 1
+
+CRUD avec un store en mémoire (HashMap)
+
+Api de la forme 
+
+```scala 
+def get(id: String): Option[User]
+```
+
+* Model sous forme de case class  
+    * User avec id, nom, prénom 
 * toJson fonction case class => String avec string interpolation  
 
 
@@ -68,11 +97,18 @@ CRUD avec un store de type Map
 ## Exercice 3 
 
 * Utiliser play json pour sérialiser les case class
- 
-## Monades 
 
-* map / flatMap 
-* for comprehension 
+Enrichir l'api :
+ 
+```scala
+def create(id: String, data: User): Either[ValidationError, User]
+def update(id: String, data: User): Either[ValidationError, User]
+def delete(id: String, data: User): Unit
+```
+* Manipulation d'option 
+* Validation avec Either
+    * create vérifie que le user n'existe pas 
+
 
 ## Futures / Programmation asynchrone 
 
