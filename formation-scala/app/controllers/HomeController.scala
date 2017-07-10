@@ -17,6 +17,10 @@ case class User(name: String, email: String)
 
 case class StoreError(msgs: List[String])
 
+object StoreError {
+  def apply(msg: String*): StoreError = StoreError(msg:_*)
+}
+
 object User {
 
   val namespace = "mathieu.ancelin"
@@ -56,6 +60,45 @@ object User {
     }
   }
 
+  def update(email: String, user: User)(implicit mongoApi: ReactiveMongoApi, ec: ExecutionContext): Future[Either[StoreError, User]] = {
+    findByEmail(email).flatMap {
+      case None => Future.successful(Left(StoreError(s"User not found for email $email")))
+      case Some(user) => {
+        users().flatMap { coll =>
+          coll
+            .update[JsObject, User](Json.obj("email" -> email), user)
+            .map {
+              case wr if wr.ok => Right(user)
+              case wr =>
+                val errors = wr.writeErrors.map(e => s"${e.code} => ${e.errmsg}").toList
+                Left(StoreError(errors))
+            } recover {
+              case d: DatabaseException => Left(StoreError(d.getMessage()))
+            }
+        }
+      }
+    }
+  }
+
+  def deleteByEmail(email: String)(implicit mongoApi: ReactiveMongoApi, ec: ExecutionContext): Future[Either[StoreError, User]] = {
+    findByEmail(email).flatMap {
+      case None => Future.successful(Left(StoreError(s"User not found for email $email")))
+      case Some(user) => {
+        users().flatMap { coll =>
+          coll
+            .remove(Json.obj("email" -> email))
+            .map {
+              case wr if wr.ok => Right(user)
+              case wr =>
+                val errors = wr.writeErrors.map(e => s"${e.code} => ${e.errmsg}").toList
+                Left(StoreError(errors))
+            } recover {
+              case d: DatabaseException => Left(StoreError(d.getMessage()))
+            }
+        }
+      }
+    }
+  }
 }
 
 @Singleton
