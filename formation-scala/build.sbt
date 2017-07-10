@@ -10,6 +10,7 @@ scalaVersion := "2.11.11"
 libraryDependencies ++= Seq(
   ws,
   "org.reactivemongo" %% "play2-reactivemongo" % "0.12.5-play25",
+  "org.reactivemongo" %% "reactivemongo-akkastream" % "0.12.5",
   "org.scalatestplus.play" %% "scalatestplus-play" % "2.0.0" % Test
 )
 
