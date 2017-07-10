@@ -13,6 +13,15 @@ import reactivemongo.play.json.collection._
 
 import scala.concurrent.{ExecutionContext, Future}
 
+object Implicits {
+
+  implicit class BetterString(str: String) {
+    def toError[A]: Either[StoreError, A] = Left(StoreError(str))
+  }
+
+}
+
+
 case class User(name: String, email: String)
 
 case class StoreError(msgs: List[String])
@@ -22,6 +31,8 @@ object StoreError {
 }
 
 object User {
+
+  import Implicits._
 
   val namespace = "mathieu.ancelin"
 
@@ -39,7 +50,7 @@ object User {
           val errors = wr.writeErrors.map(e => s"${e.code} => ${e.errmsg}").toList
           Left(StoreError(errors))
       } recover {
-        case d: DatabaseException => Left(StoreError(List(d.getMessage())))
+        case d: DatabaseException => d.getMessage().toError[User]
       }
     }
   }
@@ -105,6 +116,7 @@ object User {
 class UserController @Inject()()(implicit mongo: ReactiveMongoApi, ec: ExecutionContext) extends Controller {
 
   import User._
+  import Implicits._
 
   mongo.database.map(_.collection[JSONCollection]("users-mathieu.ancelin")).flatMap { usrs =>
     usrs.indexesManager.ensure(Index(Seq("email" -> IndexType.Ascending), unique = true))
