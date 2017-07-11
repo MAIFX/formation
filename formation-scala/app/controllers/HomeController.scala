@@ -2,10 +2,11 @@ package controllers
 
 import javax.inject._
 
-import akka.Done
+import akka.{Done, NotUsed}
 import akka.stream._
 import akka.stream.scaladsl._
 import akka.util._
+import controllers.StatsActor.{StatsMessages, UserAdded, UserDeleted, UserRead}
 import play.api.Logger
 import play.api.libs.json._
 import play.api.libs.functional.syntax._
@@ -235,7 +236,7 @@ object User {
 }
 
 @Singleton
-class UserController @Inject()()(implicit mongo: ReactiveMongoApi, wSClient: WSClient, materializer: Materializer, ec: ExecutionContext) extends Controller {
+class UserController @Inject()(statsService: StatsService)(implicit mongo: ReactiveMongoApi, wSClient: WSClient, materializer: Materializer, ec: ExecutionContext) extends Controller {
 
   import User._
 
@@ -248,7 +249,11 @@ class UserController @Inject()()(implicit mongo: ReactiveMongoApi, wSClient: WSC
   }
 
   def findByEmail(email: String) = Action.async { req =>
-    User.findByEmail(email)
+    val findByEmail = User.findByEmail(email)
+    findByEmail.onSuccess {
+      case _ => statsService.sendEvent(UserRead)
+    }
+    findByEmail
       .map { opt =>
         opt.map(u => Ok(Json.toJson(u))).getOrElse(NotFound(Json.obj()))
       }
@@ -256,6 +261,9 @@ class UserController @Inject()()(implicit mongo: ReactiveMongoApi, wSClient: WSC
 
   def findAll() = Action.async { req =>
     User.findAll().map { users =>
+      users.foreach { u =>
+        statsService.sendEvent(UserRead)
+      }
       Ok(JsArray(users.map(u => Json.toJson(u))))
     }
   }
@@ -263,8 +271,13 @@ class UserController @Inject()()(implicit mongo: ReactiveMongoApi, wSClient: WSC
   def findAllStream() = Action {
     val users = User
       .findAllStream()
+      .alsoTo(publishStats(UserRead))
       .via(User.userToCSVByteString)
     Ok.chunked(users).as("text/csv")
+  }
+
+  def publishStats[T](msg: StatsMessages): Sink[T, NotUsed] = {
+    Flow[T].to(Sink.foreach { _ => statsService.sendEvent(msg) })
   }
 
   // curl -X POST --data-binary @./conf/user.csv -H "Content-Type: text/csv" http://localhost:9000/stream/users
@@ -285,6 +298,7 @@ class UserController @Inject()()(implicit mongo: ReactiveMongoApi, wSClient: WSC
           }
       }
       .via(User.createFlow())
+      .alsoTo(publishStats(UserAdded))
       .map(json => Json.stringify(json))
       .intersperse("[\n  ", ",\n  ", "\n]")
       .map(str => ByteString(str))
@@ -294,7 +308,9 @@ class UserController @Inject()()(implicit mongo: ReactiveMongoApi, wSClient: WSC
 
   def deleteAll() = Action.async {
     User.deleteAll().map {
-      case Right(_) => Ok
+      case Right(_) =>
+        statsService.sendEvent(UserDeleted)
+        Ok
       case Left(StoreError(errors)) => InternalServerError(Json.obj(
         "errors" -> JsArray(errors.map(JsString.apply)))
       )
@@ -305,7 +321,9 @@ class UserController @Inject()()(implicit mongo: ReactiveMongoApi, wSClient: WSC
     req.body.validate[User] match {
       case JsSuccess(user, _) =>
         User.addUser(user).map {
-          case Right(usr) => Ok(Json.toJson(usr))
+          case Right(usr) =>
+            statsService.sendEvent(UserAdded)
+            Ok(Json.toJson(usr))
           case Left(StoreError(errors)) => InternalServerError(Json.obj(
             "errors" -> JsArray(errors.map(JsString.apply)))
           )
