@@ -1,6 +1,7 @@
 
 GET    /users/:email   controllers.UserController.findByEmail(email)
 GET    /users          controllers.UserController.findAll()
+DELETE  /users          controllers.UserController.deleteAll()
 GET    /stream/users   controllers.UserController.findAllStream()
 POST   /stream/users   controllers.UserController.createStream()
 POST   /users          controllers.UserController.createUser()

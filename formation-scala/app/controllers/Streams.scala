@@ -28,6 +28,9 @@ object Streams extends App {
   private val response: Future[immutable.Seq[Seq[String]]] =
     strings.runWith(Sink.seq)
 
+
+  Source(0 to 1000).mapAsync(4)(toStringAsync).runWith(Sink.seq)
+
   response.onComplete {
     case Success(l) => println(l.mkString("\n"))
     case _ => println("Err")

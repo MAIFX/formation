@@ -1,44 +1,84 @@
 package controllers
 
-import java.util.concurrent.TimeUnit
 import javax.inject._
 
+import akka.Done
 import akka.stream._
 import akka.stream.scaladsl._
 import akka.util._
-import reactivemongo.akkastream._
+import play.api.Logger
 import play.api.libs.json._
+import play.api.libs.functional.syntax._
 import play.api.libs.streams.Accumulator
+import play.api.libs.ws.WSClient
 import play.api.mvc._
 import play.modules.reactivemongo.ReactiveMongoApi
+import reactivemongo.akkastream._
 import reactivemongo.api.Cursor
 import reactivemongo.api.indexes.{Index, IndexType}
 import reactivemongo.core.errors.DatabaseException
 import reactivemongo.play.json._
 import reactivemongo.play.json.collection._
 
-import scala.concurrent.duration.FiniteDuration
 import scala.concurrent.{ExecutionContext, Future}
 
 object Implicits {
+
   implicit class BetterString(str: String) {
     def toError[A]: Either[StoreError, A] = Left(StoreError(str))
   }
-}
 
-case class User(name: String, email: String)
+}
 
 case class StoreError(msgs: List[String])
 
 object StoreError {
-  def apply(msg: String*): StoreError = StoreError(msg:_*)
+  def apply(msg: String*): StoreError = StoreError(msg: _*)
 }
+
+case class Geolocation(latitude: Double, longitude: Double)
+
+object Geolocation {
+  implicit val geoFormat = Json.format[Geolocation]
+
+  def findGeoloc(ip: String)(implicit wSClient: WSClient, ec: ExecutionContext): Future[Option[Geolocation]] = {
+    wSClient
+      .url(s"https://freegeoip.net/json/${ip}")
+      .get()
+      .map { response =>
+        response.status match {
+          case 200 =>
+            response.json.validate[Geolocation].fold(
+              err => {
+                Logger.error(s"Oups : $err")
+                None
+              },
+              success => Some(success)
+            )
+          case _ =>
+            None
+        }
+      }
+      .recover {
+        case e =>
+          Logger.error(s"Oups : ", e)
+          None
+      }
+  }
+}
+
+case class User(
+                 name: String,
+                 email: String,
+                 ipAddress: String = "127.0.0.1",
+                 geo: Option[Geolocation] = None)
 
 object User {
 
   import Implicits._
 
   val namespace = "mathieu.ancelin"
+
 
   implicit val writes = Json.writes[User]
   implicit val reads = Json.reads[User]
@@ -53,18 +93,18 @@ object User {
     materializer: Materializer,
     ec: ExecutionContext): Source[User, _] = {
 
-    Source.fromFuture(users()).flatMapConcat { coll =>
+    Source.fromFuture(getUsersCollection()).flatMapConcat { coll =>
       coll.find(Json.obj())
         .cursor[User]()
         .documentSource()
     }
   }
 
-  def users()(implicit mongo: ReactiveMongoApi, ec: ExecutionContext): Future[JSONCollection] =
+  def getUsersCollection()(implicit mongo: ReactiveMongoApi, ec: ExecutionContext): Future[JSONCollection] =
     mongo.database.map(_.collection[JSONCollection]("users-mathieu.ancelin"))
 
   def addUser(user: User)(implicit mongoApi: ReactiveMongoApi, ec: ExecutionContext): Future[Either[StoreError, User]] = {
-    users().flatMap { coll =>
+    getUsersCollection().flatMap { coll =>
       coll.insert[User](user).map {
         case wr if wr.ok => Right(user)
         case wr =>
@@ -77,7 +117,7 @@ object User {
   }
 
   def findAll()(implicit mongoApi: ReactiveMongoApi, ec: ExecutionContext): Future[Seq[User]] = {
-    users().flatMap { coll =>
+    getUsersCollection().flatMap { coll =>
       coll.find(Json.obj())
         .cursor[User]()
         .collect[Seq](Int.MaxValue, Cursor.FailOnError[Seq[User]]())
@@ -85,7 +125,7 @@ object User {
   }
 
   def createStreamOld(stream: Source[User, _])(implicit mongoApi: ReactiveMongoApi, materializer: Materializer, ec: ExecutionContext): Source[JsObject, _] = {
-    Source.fromFuture(users()).flatMapConcat { coll =>
+    Source.fromFuture(getUsersCollection()).flatMapConcat { coll =>
       stream.mapAsyncUnordered(4) { user =>
         coll.insert(user).map(wr =>
           Json.obj(
@@ -98,7 +138,7 @@ object User {
   }
 
   def createStream(stream: Source[User, _])(implicit mongoApi: ReactiveMongoApi, materializer: Materializer, ec: ExecutionContext): Source[JsObject, _] = {
-    Source.fromFuture(users()).flatMapConcat { coll =>
+    Source.fromFuture(getUsersCollection()).flatMapConcat { coll =>
       stream
         .mapAsync(20) { user =>
           coll.insert[User](user)
@@ -110,8 +150,29 @@ object User {
     }
   }
 
+  def createFlow()(implicit mongoApi: ReactiveMongoApi, ec: ExecutionContext): Flow[User, JsObject, _] = {
+    //Pour chaque user
+    Flow[User].mapAsyncUnordered(20) { user =>
+      //On insert dans la base
+      addUser(user).map {
+        // Si ok
+        case Right(u) => Json.obj(
+          "email" -> user.email,
+          "ok" -> true
+        )
+        // Si ko
+        case Left(StoreError(msgs)) =>
+          Json.obj(
+            "email" -> user.email,
+            "ok" -> false,
+            "messages" -> msgs
+          )
+      }
+    }
+  }
+
   def findByEmail(email: String)(implicit mongoApi: ReactiveMongoApi, ec: ExecutionContext): Future[Option[User]] = {
-    users().flatMap { coll =>
+    getUsersCollection().flatMap { coll =>
       coll
         .find(Json.obj("email" -> email))
         .one[User]
@@ -122,7 +183,7 @@ object User {
     findByEmail(email).flatMap {
       case None => Future.successful(Left(StoreError(s"User not found for email $email")))
       case Some(user) => {
-        users().flatMap { coll =>
+        getUsersCollection().flatMap { coll =>
           coll
             .update[JsObject, User](Json.obj("email" -> email), user)
             .map {
@@ -131,9 +192,23 @@ object User {
                 val errors = wr.writeErrors.map(e => s"${e.code} => ${e.errmsg}").toList
                 Left(StoreError(errors))
             } recover {
-              case d: DatabaseException => Left(StoreError(d.getMessage()))
-            }
+            case d: DatabaseException => Left(StoreError(d.getMessage()))
+          }
         }
+      }
+    }
+  }
+
+  def deleteAll()(implicit mongoApi: ReactiveMongoApi, ec: ExecutionContext): Future[Either[StoreError, Done]] = {
+    getUsersCollection().flatMap { coll =>
+      coll.remove(Json.obj()).map {
+        case wr if wr.ok => Right(Done)
+        case wr =>
+          val errors = wr.writeErrors.map(e => s"${e.code} => ${e.errmsg}").toList
+          Left(StoreError(errors))
+      }
+      .recover {
+        case d: DatabaseException => Left(StoreError(d.getMessage()))
       }
     }
   }
@@ -142,7 +217,7 @@ object User {
     findByEmail(email).flatMap {
       case None => Future.successful(Left(StoreError(s"User not found for email $email")))
       case Some(user) => {
-        users().flatMap { coll =>
+        getUsersCollection().flatMap { coll =>
           coll
             .remove(Json.obj("email" -> email))
             .map {
@@ -151,8 +226,8 @@ object User {
                 val errors = wr.writeErrors.map(e => s"${e.code} => ${e.errmsg}").toList
                 Left(StoreError(errors))
             } recover {
-              case d: DatabaseException => Left(StoreError(d.getMessage()))
-            }
+            case d: DatabaseException => Left(StoreError(d.getMessage()))
+          }
         }
       }
     }
@@ -160,10 +235,9 @@ object User {
 }
 
 @Singleton
-class UserController @Inject()()(implicit mongo: ReactiveMongoApi, materializer: Materializer, ec: ExecutionContext) extends Controller {
+class UserController @Inject()()(implicit mongo: ReactiveMongoApi, wSClient: WSClient, materializer: Materializer, ec: ExecutionContext) extends Controller {
 
   import User._
-  import Implicits._
 
   val sourceBodyParser = BodyParser("CSV BodyParser") { _ =>
     Accumulator.source[ByteString].map(Right.apply)
@@ -193,22 +267,38 @@ class UserController @Inject()()(implicit mongo: ReactiveMongoApi, materializer:
     Ok.chunked(users).as("text/csv")
   }
 
+  // curl -X POST --data-binary @./conf/user.csv -H "Content-Type: text/csv" http://localhost:9000/stream/users
   def createStream() = Action(sourceBodyParser) { req =>
-    val source: Source[User, _] = req.body
+
+    val finalSource: Source[ByteString, _] = req.body
       .via(Framing.delimiter(ByteString("\n"), 10000, true))
       .map(_.utf8String)
       .drop(1)
       .map(line => line.split(";").toList)
       .collect {
-        case email :: name :: ip :: Nil => User(name = name, email = email)
+        case email :: name :: ip :: Nil => User(name = name, email = email, ipAddress = ip)
       }
-
-    val finalSource: Source[ByteString, _] = User.createStream(source)
+      .mapAsyncUnordered(2) { user =>
+        Geolocation.findGeoloc(user.ipAddress)
+          .map { mayBeGeoloc =>
+            user.copy(geo = mayBeGeoloc)
+          }
+      }
+      .via(User.createFlow())
       .map(json => Json.stringify(json))
       .intersperse("[\n  ", ",\n  ", "\n]")
       .map(str => ByteString(str))
 
     Ok.chunked(finalSource).as("application/json")
+  }
+
+  def deleteAll() = Action.async {
+    User.deleteAll().map {
+      case Right(_) => Ok
+      case Left(StoreError(errors)) => InternalServerError(Json.obj(
+        "errors" -> JsArray(errors.map(JsString.apply)))
+      )
+    }
   }
 
   def createUser() = Action.async(parse.json) { req =>
