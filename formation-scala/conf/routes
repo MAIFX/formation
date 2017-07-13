@@ -1,4 +1,6 @@
 
+GET    /               controllers.UserController.index(email: Option[String])
+GET    /sse            controllers.UserController.sse
 GET    /users/:email   controllers.UserController.findByEmail(email)
 GET    /users          controllers.UserController.findAll()
 DELETE  /users          controllers.UserController.deleteAll()

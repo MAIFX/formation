@@ -1,5 +1,6 @@
 package controllers
 
+import java.util.concurrent.Executors
 import javax.inject._
 
 import akka.{Done, NotUsed}
@@ -20,6 +21,7 @@ import reactivemongo.api.indexes.{Index, IndexType}
 import reactivemongo.core.errors.DatabaseException
 import reactivemongo.play.json._
 import reactivemongo.play.json.collection._
+import scala.concurrent.duration._
 
 import scala.concurrent.{ExecutionContext, Future}
 
@@ -236,7 +238,7 @@ object User {
 }
 
 @Singleton
-class UserController @Inject()(statsService: StatsService)(implicit mongo: ReactiveMongoApi, wSClient: WSClient, materializer: Materializer, ec: ExecutionContext) extends Controller {
+class UserController @Inject()(authAction: AuthenticatedAction, statsService: StatsService)(implicit mongo: ReactiveMongoApi, wSClient: WSClient, materializer: Materializer, ec: ExecutionContext) extends Controller {
 
   import User._
 
@@ -329,6 +331,42 @@ class UserController @Inject()(statsService: StatsService)(implicit mongo: React
           )
         }
       case JsError(errors) => Future.successful(BadRequest(JsError.toJson(errors)))
+    }
+  }
+
+  def index(email: Option[String]) = authAction { ctx =>
+    Ok(views.html.index(ctx.user))
+  }
+
+  def sse = Action {
+
+    val source = Source.tick(
+      0.second,
+      1.second,
+      Done
+    )
+    .map(_ => Json.obj("value" -> System.currentTimeMillis()))
+    .map(Json.stringify)
+    .map(json => ByteString(s"data: ${json}\n\n"))
+
+    Ok.chunked(source).as("text/event-stream")
+  }
+}
+
+case class UserContext[A](user: User, request: Request[A])
+
+@Singleton
+class AuthenticatedAction @Inject()()(implicit mongo: ReactiveMongoApi, ec: ExecutionContext) extends ActionBuilder[UserContext] {
+
+  override def invokeBlock[A](request: Request[A], block: (UserContext[A]) => Future[Result]): Future[Result] = {
+    request.queryString.get("email").map(_.last) match {
+      case Some(emil) => {
+        User.findByEmail(emil).flatMap {
+          case Some(usr) => block(UserContext(usr, request))
+          case None => Future.successful(Results.Unauthorized("User not found"))
+        }
+      }
+      case None => Future.successful(Results.Unauthorized("You have to provide a login"))
     }
   }
 }

@@ -4,7 +4,12 @@
  * two arguments, a `String` for the title of the page and an `Html`
  * object to insert into the body of the page.
  *@
-@(title: String)(content: Html)
+@(title: String, displayContent: Boolean, ids: List[String])(content: Html)
+
+@puce(text: String) = {
+    <li>@text</li>
+}
+
 
 <!DOCTYPE html>
 <html lang="en">
@@ -18,7 +23,16 @@
     <body>
         @* And here's where we render the `Html` object containing
          * the page content. *@
-        @content
+        @if(displayContent) {
+            <div class="content">
+                @content
+            </div>
+        }
+        <ul>
+            @for(id <- ids) {
+                @puce(id)
+            }
+        </ul>
 
       <script src="@routes.Assets.versioned("javascripts/main.js")" type="text/javascript"></script>
     </body>

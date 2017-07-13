@@ -1,5 +1,25 @@
-@()
+@(usr: User)
 
-@main("Welcome to Play") {
-  <h1>Welcome to Play!</h1>
+@import controllers.User
+
+@main("Welcome to Play", true, List("a", "b", "c")) {
+  <div>
+    <h1>Welcome to Play!</h1>
+  </div>
+  @user(usr)
+
+  <h1>Current time</h1>
+  <h3 id="time">-----</h3>
+
+  <script>
+    var source = new EventSource("/sse");
+    source.onmessage = function(e) {
+      var data = JSON.parse(e.data);
+      document.getElementById("time").innerHTML = [
+        '<div style="background-color: red; border-radius: 10px; color: white;">',
+          data.value,
+        '</div>'
+      ].join('');
+    }
+  </script>
 }
