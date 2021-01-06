@@ -1,15 +1,15 @@
 package controllers
 
 import javax.inject._
-
 import play.api.libs.json._
 import play.api.mvc._
-import play.modules.reactivemongo.ReactiveMongoApi
+import play.modules.reactivemongo.{MongoController, ReactiveMongoApi, ReactiveMongoComponents}
 import reactivemongo.api.Cursor
+import reactivemongo.api.bson.collection.BSONCollection
 import reactivemongo.api.indexes.{Index, IndexType}
 import reactivemongo.core.errors.DatabaseException
 import reactivemongo.play.json._
-import reactivemongo.play.json.collection._
+import reactivemongo.play.json.compat._, json2bson.{ toDocumentReader, toDocumentWriter }
 
 import scala.concurrent.{ExecutionContext, Future}
 
@@ -39,16 +39,16 @@ object User {
   implicit val writes = Json.writes[User]
   implicit val reads = Json.reads[User]
 
-  def users()(implicit mongo: ReactiveMongoApi, ec: ExecutionContext): Future[JSONCollection] =
-    mongo.database.map(_.collection[JSONCollection]("users-mathieu.ancelin"))
+  def users()(implicit mongo: ReactiveMongoApi, ec: ExecutionContext): Future[BSONCollection] =
+    mongo.database.map(_.collection[BSONCollection]("users-mathieu.ancelin"))
 
   def addUser(user: User)(implicit mongoApi: ReactiveMongoApi, ec: ExecutionContext): Future[Either[StoreError, User]] = {
     users().flatMap { coll =>
-      coll.insert[User](user).map {
-        case wr if wr.ok => Right(user)
-        case wr =>
+      coll.insert.one(user).map {
+        case wr if wr.writeErrors.nonEmpty =>
           val errors = wr.writeErrors.map(e => s"${e.code} => ${e.errmsg}").toList
           Left(StoreError(errors))
+        case _ => Right(user)
       } recover {
         case d: DatabaseException => d.getMessage().toError[User]
       }
@@ -77,9 +77,9 @@ object User {
       case Some(user) => {
         users().flatMap { coll =>
           coll
-            .update[JsObject, User](Json.obj("email" -> email), user)
+            .update.one(Json.obj("email" -> email), user)
             .map {
-              case wr if wr.ok => Right(user)
+              case wr if wr.writeErrors.isEmpty => Right(user)
               case wr =>
                 val errors = wr.writeErrors.map(e => s"${e.code} => ${e.errmsg}").toList
                 Left(StoreError(errors))
@@ -97,9 +97,9 @@ object User {
       case Some(user) => {
         users().flatMap { coll =>
           coll
-            .remove(Json.obj("email" -> email))
+            .delete.one(Json.obj("email" -> email))
             .map {
-              case wr if wr.ok => Right(user)
+              case wr if wr.writeErrors.isEmpty => Right(user)
               case wr =>
                 val errors = wr.writeErrors.map(e => s"${e.code} => ${e.errmsg}").toList
                 Left(StoreError(errors))
@@ -113,12 +113,14 @@ object User {
 }
 
 @Singleton
-class UserController @Inject()()(implicit mongo: ReactiveMongoApi, ec: ExecutionContext) extends Controller {
+class UserController @Inject()(components: ControllerComponents, reactiveMongoApi: ReactiveMongoApi)(implicit ec: ExecutionContext)  extends AbstractController(components) {
 
   import User._
   import Implicits._
 
-  mongo.database.map(_.collection[JSONCollection]("users-mathieu.ancelin")).flatMap { usrs =>
+  implicit val rmapi = reactiveMongoApi
+
+  reactiveMongoApi.database.map(_.collection[BSONCollection]("users-mathieu.ancelin")).flatMap { usrs =>
     usrs.indexesManager.ensure(Index(Seq("email" -> IndexType.Ascending), unique = true))
   }
 
