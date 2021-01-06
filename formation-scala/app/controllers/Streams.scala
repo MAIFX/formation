@@ -3,7 +3,7 @@ package controllers
 import akka.{Done, NotUsed}
 import akka.actor.ActorSystem
 import akka.stream.scaladsl.{FileIO, Flow, Keep, Sink, Source, SourceQueueWithComplete}
-import akka.stream.{ActorMaterializer, OverflowStrategy}
+import akka.stream.{ActorMaterializer, Materializer, OverflowStrategy}
 
 import scala.collection.immutable
 import scala.concurrent.Future
@@ -16,7 +16,7 @@ import scala.util.Success
 object Streams extends App {
 
   implicit val system = ActorSystem()
-  implicit val mat = ActorMaterializer()
+  implicit val mat = Materializer(system)
 
   import system.dispatcher
 
