@@ -1,7 +1,6 @@
 package controllers
 
 import javax.inject._
-
 import akka.Done
 import akka.stream._
 import akka.stream.scaladsl._
@@ -18,7 +17,9 @@ import reactivemongo.api.Cursor
 import reactivemongo.api.indexes.{Index, IndexType}
 import reactivemongo.core.errors.DatabaseException
 import reactivemongo.play.json._
-import reactivemongo.play.json.collection._
+import reactivemongo.play.json.compat._
+import json2bson.{toDocumentReader, toDocumentWriter}
+import reactivemongo.api.bson.collection.BSONCollection
 
 import scala.concurrent.{ExecutionContext, Future}
 
@@ -39,6 +40,9 @@ object StoreError {
 case class Geolocation(latitude: Double, longitude: Double)
 
 object Geolocation {
+
+  val logger = Logger(Geolocation.getClass)
+
   implicit val geoFormat = Json.format[Geolocation]
 
   def findGeoloc(ip: String)(implicit wSClient: WSClient, ec: ExecutionContext): Future[Option[Geolocation]] = {
@@ -50,7 +54,7 @@ object Geolocation {
           case 200 =>
             response.json.validate[Geolocation].fold(
               err => {
-                Logger.error(s"Oups : $err")
+                logger.error(s"Oups : $err")
                 None
               },
               success => Some(success)
@@ -61,7 +65,7 @@ object Geolocation {
       }
       .recover {
         case e =>
-          Logger.error(s"Oups : ", e)
+          logger.error(s"Oups : ", e)
           None
       }
   }
@@ -93,20 +97,20 @@ object User {
     materializer: Materializer,
     ec: ExecutionContext): Source[User, _] = {
 
-    Source.fromFuture(getUsersCollection()).flatMapConcat { coll =>
+    Source.future(getUsersCollection()).flatMapConcat { coll =>
       coll.find(Json.obj())
         .cursor[User]()
         .documentSource()
     }
   }
 
-  def getUsersCollection()(implicit mongo: ReactiveMongoApi, ec: ExecutionContext): Future[JSONCollection] =
-    mongo.database.map(_.collection[JSONCollection]("users-mathieu.ancelin"))
+  def getUsersCollection()(implicit mongo: ReactiveMongoApi, ec: ExecutionContext): Future[BSONCollection] =
+    mongo.database.map(_.collection[BSONCollection]("users-mathieu.ancelin"))
 
   def addUser(user: User)(implicit mongoApi: ReactiveMongoApi, ec: ExecutionContext): Future[Either[StoreError, User]] = {
     getUsersCollection().flatMap { coll =>
-      coll.insert[User](user).map {
-        case wr if wr.ok => Right(user)
+      coll.insert.one(user).map {
+        case wr if wr.writeErrors.isEmpty => Right(user)
         case wr =>
           val errors = wr.writeErrors.map(e => s"${e.code} => ${e.errmsg}").toList
           Left(StoreError(errors))
@@ -125,11 +129,11 @@ object User {
   }
 
   def createStreamOld(stream: Source[User, _])(implicit mongoApi: ReactiveMongoApi, materializer: Materializer, ec: ExecutionContext): Source[JsObject, _] = {
-    Source.fromFuture(getUsersCollection()).flatMapConcat { coll =>
+    Source.future(getUsersCollection()).flatMapConcat { coll =>
       stream.mapAsyncUnordered(4) { user =>
-        coll.insert(user).map(wr =>
+        coll.insert.one(user).map(wr =>
           Json.obj(
-            "ok" -> wr.ok,
+            "ok" -> wr.writeErrors.isEmpty,
             "email" -> user.email
           )
         )
@@ -138,13 +142,13 @@ object User {
   }
 
   def createStream(stream: Source[User, _])(implicit mongoApi: ReactiveMongoApi, materializer: Materializer, ec: ExecutionContext): Source[JsObject, _] = {
-    Source.fromFuture(getUsersCollection()).flatMapConcat { coll =>
+    Source.future(getUsersCollection()).flatMapConcat { coll =>
       stream
         .mapAsync(20) { user =>
-          coll.insert[User](user)
+          coll.insert.one(user)
             .map(wr => Json.obj(
               "email" -> user.email,
-              "ok" -> wr.ok
+              "ok" -> wr.writeErrors.isEmpty
             ))
         }
     }
@@ -185,9 +189,9 @@ object User {
       case Some(user) => {
         getUsersCollection().flatMap { coll =>
           coll
-            .update[JsObject, User](Json.obj("email" -> email), user)
+            .update.one(Json.obj("email" -> email), user)
             .map {
-              case wr if wr.ok => Right(user)
+              case wr if wr.writeErrors.isEmpty => Right(user)
               case wr =>
                 val errors = wr.writeErrors.map(e => s"${e.code} => ${e.errmsg}").toList
                 Left(StoreError(errors))
@@ -201,15 +205,19 @@ object User {
 
   def deleteAll()(implicit mongoApi: ReactiveMongoApi, ec: ExecutionContext): Future[Either[StoreError, Done]] = {
     getUsersCollection().flatMap { coll =>
-      coll.remove(Json.obj()).map {
-        case wr if wr.ok => Right(Done)
-        case wr =>
-          val errors = wr.writeErrors.map(e => s"${e.code} => ${e.errmsg}").toList
-          Left(StoreError(errors))
-      }
-      .recover {
-        case d: DatabaseException => Left(StoreError(d.getMessage()))
-      }
+      val builder = coll.delete(ordered = false)
+
+      builder.element(Json.obj())
+        .flatMap(ops => builder.many(List(ops)))
+        .map {
+          case wr if wr.ok => Right(Done)
+          case wr =>
+            val errors = wr.writeErrors.map(e => s"${e.code} => ${e.errmsg}").toList
+            Left(StoreError(errors))
+        }
+        .recover {
+          case d: DatabaseException => Left(StoreError(d.getMessage()))
+        }
     }
   }
 
@@ -217,11 +225,13 @@ object User {
     findByEmail(email).flatMap {
       case None => Future.successful(Left(StoreError(s"User not found for email $email")))
       case Some(user) => {
+
         getUsersCollection().flatMap { coll =>
-          coll
-            .remove(Json.obj("email" -> email))
+          val builder = coll.delete(ordered = false)
+          builder.element(Json.obj("email" -> email))
+            .flatMap(ops => builder.many(List(ops)))
             .map {
-              case wr if wr.ok => Right(user)
+              case wr if wr.writeErrors.isEmpty => Right(user)
               case wr =>
                 val errors = wr.writeErrors.map(e => s"${e.code} => ${e.errmsg}").toList
                 Left(StoreError(errors))
@@ -235,7 +245,7 @@ object User {
 }
 
 @Singleton
-class UserController @Inject()()(implicit mongo: ReactiveMongoApi, wSClient: WSClient, materializer: Materializer, ec: ExecutionContext) extends Controller {
+class UserController @Inject()(components: ControllerComponents)(implicit mongo: ReactiveMongoApi, wSClient: WSClient, materializer: Materializer, ec: ExecutionContext)   extends AbstractController(components) {
 
   import User._
 
@@ -243,7 +253,7 @@ class UserController @Inject()()(implicit mongo: ReactiveMongoApi, wSClient: WSC
     Accumulator.source[ByteString].map(Right.apply)
   }
 
-  mongo.database.map(_.collection[JSONCollection]("users-mathieu.ancelin")).flatMap { usrs =>
+  mongo.database.map(_.collection[BSONCollection]("users-mathieu.ancelin")).flatMap { usrs =>
     usrs.indexesManager.ensure(Index(Seq("email" -> IndexType.Ascending), unique = true))
   }
 
