@@ -1,15 +1,15 @@
 package controllers
 
 import javax.inject._
-
 import play.api.libs.json._
 import play.api.mvc._
 import play.modules.reactivemongo.ReactiveMongoApi
 import reactivemongo.api.Cursor
+import reactivemongo.api.bson.collection.BSONCollection
 import reactivemongo.api.indexes.{Index, IndexType}
 import reactivemongo.core.errors.DatabaseException
 import reactivemongo.play.json._
-import reactivemongo.play.json.collection._
+import reactivemongo.play.json.compat._, json2bson.{ toDocumentReader, toDocumentWriter }
 
 import scala.concurrent.{ExecutionContext, Future}
 
@@ -24,13 +24,13 @@ object User {
   implicit val writes = Json.writes[User]
   implicit val reads = Json.reads[User]
 
-  def users()(implicit mongo: ReactiveMongoApi, ec: ExecutionContext): Future[JSONCollection] =
-    mongo.database.map(_.collection[JSONCollection]("users-mathieu.ancelin"))
+  def users()(implicit mongo: ReactiveMongoApi, ec: ExecutionContext): Future[BSONCollection] =
+    mongo.database.map(_.collection[BSONCollection]("users-mathieu.ancelin"))
 
   def addUser(user: User)(implicit mongoApi: ReactiveMongoApi, ec: ExecutionContext): Future[Either[StoreError, User]] = {
     users().flatMap { coll =>
-      coll.insert[User](user).map {
-        case wr if wr.ok => Right(user)
+      coll.insert.one(user).map {
+        case wr if wr.writeErrors.isEmpty => Right(user)
         case wr =>
           val errors = wr.writeErrors.map(e => s"${e.code} => ${e.errmsg}").toList
           Left(StoreError(errors))
@@ -59,11 +59,11 @@ object User {
 }
 
 @Singleton
-class UserController @Inject()()(implicit mongo: ReactiveMongoApi, ec: ExecutionContext) extends Controller {
+class UserController @Inject()(components: ControllerComponents)(implicit mongo: ReactiveMongoApi, ec: ExecutionContext)  extends AbstractController(components) {
 
   import User._
 
-  mongo.database.map(_.collection[JSONCollection]("users-mathieu.ancelin")).flatMap { usrs =>
+  mongo.database.map(_.collection[BSONCollection]("users-mathieu.ancelin")).flatMap { usrs =>
     usrs.indexesManager.ensure(Index(Seq("email" -> IndexType.Ascending), unique = true))
   }
 
