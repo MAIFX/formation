@@ -13,11 +13,10 @@ import akka.stream.scaladsl._
 import akka.util._
 import controllers.StatsActor.{StatsMessages, UserAdded, UserDeleted, UserRead}
 import play.api.Logger
-import play.api.libs.functional.syntax._
 import play.api.libs.streams.Accumulator
 import play.api.libs.ws.WSClient
+import play.api.libs.functional.syntax._
 import play.api.mvc._
-import play.modules.reactivemongo.{MongoController, ReactiveMongoApi, ReactiveMongoComponents}
 import play.modules.reactivemongo.ReactiveMongoApi
 import reactivemongo.akkastream._
 import reactivemongo.api.Cursor
@@ -253,7 +252,7 @@ object User {
 class UserController @Inject()(statsService: StatsService,
                                components: ControllerComponents,
                                reactiveMongoApi: ReactiveMongoApi)
-                              (implicit ec: ExecutionContext, wSClient: WSClient, mat: Materializer)  extends AbstractController(components) {
+                              (implicit ec: ExecutionContext, wSClient: WSClient, mat: Materializer) extends AbstractController(components) {
 
   import User._
 

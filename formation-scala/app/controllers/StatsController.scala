@@ -1,7 +1,6 @@
 package controllers
 
 import javax.inject.{Inject, Singleton}
-
 import akka.actor.{Actor, ActorRef, ActorSystem, Cancellable, PoisonPill, Props}
 import akka.stream.Materializer
 import akka.util.Timeout
@@ -9,7 +8,7 @@ import controllers.PrintStats.Print
 import controllers.StatsActor._
 import play.api.Logger
 import play.api.libs.json.Json
-import play.api.mvc.{Action, Controller}
+import play.api.mvc.{AbstractController, ControllerComponents}
 
 import scala.concurrent.duration.DurationInt
 import scala.concurrent.{ExecutionContext, Future}
@@ -106,15 +105,17 @@ object PrintStats {
 
 class PrintStats extends Actor {
 
+  val logger = Logger(PrintStats.getClass)
+
   override def receive: Receive = {
-    case Print(stats) => Logger.info(s"New stats: $stats")
+    case Print(stats) => logger.info(s"New stats: $stats")
   }
 }
 
 
 
 @Singleton
-class StatsController @Inject()(statsService: StatsService)(implicit materializer: Materializer, ec: ExecutionContext, actorSystem: ActorSystem) extends Controller {
+class StatsController @Inject()(components: ControllerComponents, statsService: StatsService)(implicit materializer: Materializer, ec: ExecutionContext, actorSystem: ActorSystem) extends AbstractController(components) {
 
   import Stats._
 
